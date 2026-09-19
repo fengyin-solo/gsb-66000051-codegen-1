@@ -224,6 +224,26 @@ export const getLanguageConfig = (value: string): LanguageConfig => {
   return LANGUAGE_CONFIGS.find(l => l.value === value) || LANGUAGE_CONFIGS[0];
 };
 
+export interface BatchRoomResultItem {
+  roomId: string;
+  roomTitle: string;
+  roomCode: string;
+  action: BatchRoomAction;
+  targetStatus: InterviewRoom['status'];
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  message?: string;
+  timestamp: string;
+}
+
+export interface BatchRoomResultReport {
+  id: string;
+  action: BatchRoomAction;
+  finishedAt: string;
+  items: BatchRoomResultItem[];
+}
+
+export type BatchRoomAction = 'COMPLETE' | 'CANCEL' | 'RESTORE';
+
 export interface JoinRoomResponse {
   participant: ParticipantStatus;
   room: InterviewRoom;

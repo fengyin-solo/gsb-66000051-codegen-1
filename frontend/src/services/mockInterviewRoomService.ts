@@ -126,6 +126,16 @@ export async function mockUpdateRoomStatus(roomId: string, status: string): Prom
     status: status as InterviewRoom['status'],
   };
 
+  if (status === 'ACTIVE' && !updatedRoom.startedAt) {
+    updatedRoom.startedAt = new Date().toISOString();
+  } else if ((status === 'COMPLETED' || status === 'CANCELLED') && !updatedRoom.endedAt) {
+    updatedRoom.endedAt = new Date().toISOString();
+  } else if (status === 'WAITING') {
+    // 恢复为等待中：清除起止时间，回到与新建房间一致的状态
+    updatedRoom.startedAt = undefined;
+    updatedRoom.endedAt = undefined;
+  }
+
   roomsCache = [...rooms];
   roomsCache[index] = updatedRoom;
   saveToStorage(roomsCache);

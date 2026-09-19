@@ -1,5 +1,5 @@
 import { request } from './api';
-import type { CreateRoomRequest, InterviewRoom, ParticipantStatus, JoinRoomResponse, CreateRoomResponse } from '../types';
+import type { CreateRoomRequest, InterviewRoom, ParticipantStatus, JoinRoomResponse, CreateRoomResponse, BatchRoomResultItem, BatchRoomAction } from '../types';
 import {
   mockCreateRoom,
   mockGetRoomById,
@@ -98,6 +98,55 @@ export async function updateRoomStatus(roomId: string, status: string): Promise<
     }
     throw error;
   }
+}
+
+export interface BatchUpdateEntry {
+  room: InterviewRoom;
+  action: BatchRoomAction;
+}
+
+// 逐个独立执行：单个条目失败不影响其他条目，成功的更新随结果一起返回
+export async function batchUpdateRoomStatuses(
+  entries: BatchUpdateEntry[],
+): Promise<{ results: BatchRoomResultItem[]; updatedRooms: InterviewRoom[] }> {
+  const settled = await Promise.all(
+    entries.map(async ({ room, action }): Promise<{ item: BatchRoomResultItem; updated?: InterviewRoom }> => {
+      const targetStatus = action === 'RESTORE' ? 'WAITING' : action === 'CANCEL' ? 'CANCELLED' : 'COMPLETED';
+      try {
+        const updated = await updateRoomStatus(room.id, targetStatus);
+        return {
+          updated,
+          item: {
+            roomId: room.id,
+            roomTitle: room.title,
+            roomCode: room.roomCode,
+            action,
+            targetStatus,
+            status: 'SUCCESS',
+            timestamp: new Date().toISOString(),
+          },
+        };
+      } catch (error: any) {
+        return {
+          item: {
+            roomId: room.id,
+            roomTitle: room.title,
+            roomCode: room.roomCode,
+            action,
+            targetStatus,
+            status: 'FAILED',
+            message: error?.message || '操作失败，请稍后重试',
+            timestamp: new Date().toISOString(),
+          },
+        };
+      }
+    }),
+  );
+
+  return {
+    results: settled.map((s) => s.item),
+    updatedRooms: settled.filter((s): s is { item: BatchRoomResultItem; updated: InterviewRoom } => Boolean(s.updated)).map((s) => s.updated),
+  };
 }
 
 export async function getRoomParticipants(roomId: string): Promise<ParticipantStatus[]> {

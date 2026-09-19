@@ -110,6 +110,10 @@ public class InterviewRoomController {
             room.setStartedAt(LocalDateTime.now());
         } else if (("COMPLETED".equals(status) || "CANCELLED".equals(status)) && room.getEndedAt() == null) {
             room.setEndedAt(LocalDateTime.now());
+        } else if ("WAITING".equals(status)) {
+            // 恢复为等待中：清除起止时间，回到与新建房间一致的状态
+            room.setStartedAt(null);
+            room.setEndedAt(null);
         }
 
         InterviewRoom updatedRoom = interviewRoomRepository.save(room);

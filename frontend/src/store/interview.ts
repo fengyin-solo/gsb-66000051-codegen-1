@@ -65,6 +65,7 @@ interface InterviewState {
   setRoom: (room: InterviewRoom) => void;
   setCurrentUser: (user: User) => void;
   setMyRooms: (rooms: InterviewRoom[]) => void;
+  mergeRoomsIntoMyRooms: (rooms: InterviewRoom[]) => void;
   setCurrentRoom: (room: InterviewRoom | null) => void;
   setInvitations: (invitations: CandidateInvitation[]) => void;
   setParticipants: (participants: ParticipantStatus[]) => void;
@@ -114,6 +115,10 @@ export const useInterviewStore = create<InterviewState>((set) => ({
   setRoom: (room) => set({ deprecatedRoom: room, room, currentRoom: room }),
   setCurrentUser: (user) => set({ currentUser: user }),
   setMyRooms: (rooms) => set({ myRooms: rooms }),
+  mergeRoomsIntoMyRooms: (rooms) => set((state) => ({
+    // 仅就地更新已有条目，不新增、不删除、不重排，保证筛选结果为空时整页数据不被清空
+    myRooms: state.myRooms.map((r) => rooms.find((updated) => updated.id === r.id) || r),
+  })),
   setCurrentRoom: (room) => set((state) => {
     const oldRoom = state.currentRoom;
     if (oldRoom && room && oldRoom.status !== room.status) {
