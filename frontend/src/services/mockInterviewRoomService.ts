@@ -1,4 +1,14 @@
-import type { InterviewRoom, ParticipantStatus, CreateRoomRequest, CreateRoomResponse, JoinRoomResponse } from '../types';
+import type {
+  InterviewRoom,
+  ParticipantStatus,
+  CreateRoomRequest,
+  CreateRoomResponse,
+  JoinRoomResponse,
+  BatchRoomAction,
+  BatchRoomStatusItemResult,
+  BatchRoomStatusResponse,
+} from '../types';
+import { isBatchTransitionAllowed } from '../types';
 
 const STORAGE_KEY = 'code_interview_rooms';
 
@@ -130,6 +140,76 @@ export async function mockUpdateRoomStatus(roomId: string, status: string): Prom
   roomsCache[index] = updatedRoom;
   saveToStorage(roomsCache);
   return { ...updatedRoom };
+}
+
+/**
+ * 批量变更房间状态，逐项处理：成功的条目立即落盘，失败的条目不影响其它条目。
+ * 与后端 /interview-rooms/batch-status 的逐项语义保持一致。
+ */
+export async function mockBatchUpdateRoomStatuses(
+  items: { roomId: string; targetStatus: BatchRoomAction }[]
+): Promise<BatchRoomStatusResponse> {
+  await delay(400);
+  const rooms = getRoomsCache();
+  const nextRooms = [...rooms];
+  const results: BatchRoomStatusItemResult[] = [];
+
+  const statusLabel = (status: string): string => {
+    switch (status) {
+      case 'WAITING': return '等待中';
+      case 'ACTIVE': return '进行中';
+      case 'COMPLETED': return '已结束';
+      case 'CANCELLED': return '已取消';
+      default: return status;
+    }
+  };
+
+  for (const item of items) {
+    const index = nextRooms.findIndex(r => r.id === item.roomId);
+    if (index === -1) {
+      results.push({ roomId: item.roomId, targetStatus: item.targetStatus, success: false, message: '房间不存在', room: null });
+      continue;
+    }
+
+    const current = nextRooms[index];
+    if (!isBatchTransitionAllowed(current.status, item.targetStatus)) {
+      results.push({
+        roomId: item.roomId,
+        targetStatus: item.targetStatus,
+        success: false,
+        message: `当前状态「${statusLabel(current.status)}」不支持此操作`,
+        room: null,
+      });
+      continue;
+    }
+
+    const updatedRoom: InterviewRoom = { ...current, status: item.targetStatus };
+    if (item.targetStatus === 'COMPLETED' || item.targetStatus === 'CANCELLED') {
+      if (!updatedRoom.endedAt) {
+        updatedRoom.endedAt = new Date().toISOString();
+      }
+    } else if (item.targetStatus === 'WAITING') {
+      updatedRoom.endedAt = undefined;
+      updatedRoom.startedAt = undefined;
+    }
+
+    nextRooms[index] = updatedRoom;
+    results.push({ roomId: item.roomId, targetStatus: item.targetStatus, success: true, message: '操作成功', room: { ...updatedRoom } });
+  }
+
+  // 仅在有至少一个成功条目时写回，保证部分成功被保留
+  if (results.some(r => r.success)) {
+    roomsCache = nextRooms;
+    saveToStorage(roomsCache);
+  }
+
+  return {
+    action: items[0]?.targetStatus ?? 'COMPLETED',
+    total: results.length,
+    successCount: results.filter(r => r.success).length,
+    failedCount: results.filter(r => !r.success).length,
+    results,
+  };
 }
 
 export async function mockGetRoomParticipants(roomId: string): Promise<ParticipantStatus[]> {

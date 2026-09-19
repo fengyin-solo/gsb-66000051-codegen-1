@@ -123,6 +123,60 @@ export interface CreateRoomResponse {
   participant: ParticipantStatus;
 }
 
+/** 批量管理房间状态的目标动作 */
+export type BatchRoomAction = 'COMPLETED' | 'CANCELLED' | 'WAITING';
+
+export interface BatchRoomStatusItem {
+  roomId: string;
+  targetStatus: BatchRoomAction;
+}
+
+export interface BatchRoomStatusRequest {
+  items: BatchRoomStatusItem[];
+}
+
+export interface BatchRoomStatusItemResult {
+  roomId: string;
+  targetStatus: BatchRoomAction;
+  success: boolean;
+  message: string;
+  room: InterviewRoom | null;
+}
+
+export interface BatchRoomStatusResponse {
+  action: BatchRoomAction;
+  total: number;
+  successCount: number;
+  failedCount: number;
+  results: BatchRoomStatusItemResult[];
+}
+
+/** 可参与批量管理的房间状态：等待中、已完成 */
+export const BATCHABLE_ROOM_STATUSES: InterviewRoom['status'][] = ['WAITING', 'COMPLETED'];
+
+export const BATCH_ROOM_ACTION_LABELS: Record<BatchRoomAction, string> = {
+  COMPLETED: '收进已结束',
+  CANCELLED: '取消',
+  WAITING: '恢复为等待中',
+};
+
+/**
+ * 批量管理允许的状态流转：
+ * 等待中 -> 已结束 / 已取消；已完成 -> 等待中（恢复）。
+ */
+export const isBatchTransitionAllowed = (
+  currentStatus: InterviewRoom['status'],
+  targetStatus: BatchRoomAction
+): boolean => {
+  if (targetStatus === 'COMPLETED' || targetStatus === 'CANCELLED') {
+    return currentStatus === 'WAITING';
+  }
+  if (targetStatus === 'WAITING') {
+    return currentStatus === 'COMPLETED';
+  }
+  return false;
+};
+
 export interface LanguageConfig {
   value: string;
   label: string;

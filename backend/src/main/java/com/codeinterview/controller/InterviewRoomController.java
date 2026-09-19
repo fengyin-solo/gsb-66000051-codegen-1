@@ -1,5 +1,8 @@
 package com.codeinterview.controller;
 
+import com.codeinterview.dto.BatchRoomStatusItemResult;
+import com.codeinterview.dto.BatchRoomStatusRequest;
+import com.codeinterview.dto.BatchRoomStatusResponse;
 import com.codeinterview.dto.CreateRoomResponse;
 import com.codeinterview.dto.JoinRoomResponse;
 import com.codeinterview.dto.WebSocketMessage;
@@ -17,10 +20,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/interview-rooms")
@@ -114,6 +119,102 @@ public class InterviewRoomController {
 
         InterviewRoom updatedRoom = interviewRoomRepository.save(room);
         return new ResponseEntity<>(updatedRoom, HttpStatus.OK);
+    }
+
+    /**
+     * 批量变更房间状态（结束 / 取消 / 恢复）。
+     * 每个条目独立处理：单个条目失败不会回滚其它已成功条目，
+     * 响应中逐项返回结果，未生效条目可由前端单独重试。
+     * 刻意不加类级/方法级事务，避免某个条目出错导致整批回滚。
+     */
+    @PostMapping("/batch-status")
+    public ResponseEntity<BatchRoomStatusResponse> batchUpdateRoomStatus(@RequestBody BatchRoomStatusRequest request) {
+        List<BatchRoomStatusItemResult> results = new ArrayList<>();
+
+        if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
+            return new ResponseEntity<>(new BatchRoomStatusResponse(null, results), HttpStatus.BAD_REQUEST);
+        }
+
+        String action = null;
+        for (BatchRoomStatusRequest.Item item : request.getItems()) {
+            String roomId = item.getRoomId();
+            String targetStatus = item.getTargetStatus();
+            if (action == null) {
+                action = targetStatus;
+            }
+
+            if (roomId == null || roomId.trim().isEmpty() || targetStatus == null || targetStatus.trim().isEmpty()) {
+                results.add(new BatchRoomStatusItemResult(roomId, targetStatus, false, "房间ID和目标状态不能为空", null));
+                continue;
+            }
+
+            Optional<InterviewRoom> roomOpt = interviewRoomRepository.findById(roomId);
+            if (roomOpt.isEmpty()) {
+                results.add(new BatchRoomStatusItemResult(roomId, targetStatus, false, "房间不存在", null));
+                continue;
+            }
+
+            InterviewRoom room = roomOpt.get();
+            String currentStatus = room.getStatus();
+            if (!isBatchTransitionAllowed(currentStatus, targetStatus)) {
+                results.add(new BatchRoomStatusItemResult(roomId, targetStatus, false,
+                        "当前状态「" + statusLabel(currentStatus) + "」不支持此操作", null));
+                continue;
+            }
+
+            try {
+                applyStatusChange(room, targetStatus);
+                InterviewRoom savedRoom = interviewRoomRepository.save(room);
+                results.add(new BatchRoomStatusItemResult(roomId, targetStatus, true, "操作成功", savedRoom));
+            } catch (Exception e) {
+                results.add(new BatchRoomStatusItemResult(roomId, targetStatus, false,
+                        "保存失败：" + e.getMessage(), null));
+            }
+        }
+
+        return new ResponseEntity<>(new BatchRoomStatusResponse(action, results), HttpStatus.OK);
+    }
+
+    /**
+     * 批量管理允许的状态流转：
+     * 等待中 -> 已结束 / 已取消；已完成 -> 等待中（恢复）。
+     * 进行中、已取消的房间不参与批量管理。
+     */
+    private boolean isBatchTransitionAllowed(String currentStatus, String targetStatus) {
+        if (currentStatus == null || targetStatus == null || !Set.of("COMPLETED", "CANCELLED", "WAITING").contains(targetStatus)) {
+            return false;
+        }
+        return switch (targetStatus) {
+            case "COMPLETED", "CANCELLED" -> "WAITING".equals(currentStatus);
+            case "WAITING" -> "COMPLETED".equals(currentStatus);
+            default -> false;
+        };
+    }
+
+    private void applyStatusChange(InterviewRoom room, String targetStatus) {
+        room.setStatus(targetStatus);
+        if ("COMPLETED".equals(targetStatus) || "CANCELLED".equals(targetStatus)) {
+            if (room.getEndedAt() == null) {
+                room.setEndedAt(LocalDateTime.now());
+            }
+        } else if ("WAITING".equals(targetStatus)) {
+            // 恢复为等待中：清除结束/开始时间，房间重新回到可开始状态
+            room.setEndedAt(null);
+            room.setStartedAt(null);
+        }
+    }
+
+    private String statusLabel(String status) {
+        if (status == null) {
+            return "未知";
+        }
+        return switch (status) {
+            case "WAITING" -> "等待中";
+            case "ACTIVE" -> "进行中";
+            case "COMPLETED" -> "已结束";
+            case "CANCELLED" -> "已取消";
+            default -> status;
+        };
     }
 
     @GetMapping("/{roomId}/participants")

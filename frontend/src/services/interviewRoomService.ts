@@ -1,11 +1,20 @@
 import { request } from './api';
-import type { CreateRoomRequest, InterviewRoom, ParticipantStatus, JoinRoomResponse, CreateRoomResponse } from '../types';
+import type {
+  CreateRoomRequest,
+  InterviewRoom,
+  ParticipantStatus,
+  JoinRoomResponse,
+  CreateRoomResponse,
+  BatchRoomAction,
+  BatchRoomStatusResponse,
+} from '../types';
 import {
   mockCreateRoom,
   mockGetRoomById,
   mockGetRoomByCode,
   mockGetRoomsByInterviewer,
   mockUpdateRoomStatus,
+  mockBatchUpdateRoomStatuses,
   mockGetRoomParticipants,
   mockJoinRoom,
   mockLeaveRoom,
@@ -95,6 +104,29 @@ export async function updateRoomStatus(roomId: string, status: string): Promise<
   } catch (error: any) {
     if (handleApiError(error)) {
       return mockUpdateRoomStatus(roomId, status);
+    }
+    throw error;
+  }
+}
+
+/**
+ * 批量变更房间状态。逐项返回成功/失败结果：
+ * 已成功的条目由调用方更新列表，未生效的条目可单独重试。
+ */
+export async function batchUpdateRoomStatuses(
+  items: { roomId: string; targetStatus: BatchRoomAction }[]
+): Promise<BatchRoomStatusResponse> {
+  if (isUsingMockData()) {
+    return mockBatchUpdateRoomStatuses(items);
+  }
+  try {
+    return await request<BatchRoomStatusResponse>('/interview-rooms/batch-status', {
+      method: 'POST',
+      body: { items },
+    });
+  } catch (error: any) {
+    if (handleApiError(error)) {
+      return mockBatchUpdateRoomStatuses(items);
     }
     throw error;
   }
